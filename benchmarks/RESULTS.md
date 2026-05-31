@@ -70,3 +70,26 @@ P(layer=k) = floor(-ln(uniform) * mL), mL = 1/ln(M) = 1/ln(16) = 0.36
   TRANSFORMERS_OFFLINE=1 python3 ml/embed_server.py &
   java -Xmx512m -jar target/vektr-1.0.0.jar &
   mvn test
+
+---
+
+## 7. Real Dataset Results (Week 6)
+
+Ingested 31 Wikipedia articles across AI/ML/CS topics.
+
+| Metric | Value |
+|--------|-------|
+| Total articles | 31 |
+| Total vectors | 84 |
+| Avg chunks per article | 2.7 |
+| Avg embed latency per batch | ~28ms |
+| Index persisted to disk | yes (atomic rename) |
+| Index load time on restart | <15ms |
+
+Sample query: "how does attention mechanism work"
+Results correctly ranked chunks from:
+  - Attention_(machine_learning)  [rank 1-2]
+  - Transformer architecture      [rank 3]
+  - BERT                          [rank 4]
+
+Cross-document semantic retrieval working correctly.
