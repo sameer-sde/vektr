@@ -19,7 +19,9 @@ public class EmbeddingClient {
     public EmbeddingClient(String baseUrl) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length()-1) : baseUrl;
         this.http = new OkHttpClient.Builder()
-            .connectTimeout(5, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
             .connectionPool(new ConnectionPool(10, 5, TimeUnit.MINUTES)).build();
     }
 

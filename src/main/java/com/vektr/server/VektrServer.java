@@ -11,13 +11,15 @@ import com.vektr.query.QueryRewriter;
 import com.vektr.retrieval.BM25Index;
 import com.vektr.retrieval.ReciprocalRankFusion;
 import io.undertow.Undertow;
+import io.undertow.server.BlockingHttpExchange;
+import io.undertow.server.HttpServerExchange;
 import io.undertow.server.RoutingHandler;
 import io.undertow.util.Headers;
 import io.undertow.util.Methods;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 
 public class VektrServer {
     private static final Logger log = LoggerFactory.getLogger(VektrServer.class);
@@ -28,20 +30,22 @@ public class VektrServer {
     private final ReciprocalRankFusion rrf = new ReciprocalRankFusion();
     private final DocumentChunker chunker = new DocumentChunker();
     private final EmbeddingClient embeddingClient = EmbeddingClient.defaultClient();
-    private final LlmClient llmClient = LlmClient.defaultClient();
     private final QueryCache queryCache = QueryCache.defaultCache();
-    private final QueryRewriter queryRewriter = QueryRewriter.disabled(); // enable when Ollama is running
     private final Map<String, String> chunkStore = new ConcurrentHashMap<>();
+    private final ExecutorService worker = Executors.newFixedThreadPool(20);
     private volatile long totalIngest = 0, totalSearch = 0, totalCacheHits = 0;
 
-    private void handleIngest(io.undertow.server.HttpServerExchange ex) {
-        ex.getRequestReceiver().receiveFullBytes((e, body) -> {
+    private void handleIngest(HttpServerExchange ex) {
+        ex.startBlocking();
+        ex.dispatch(worker, () -> {
             try {
+                byte[] bytes = ex.getInputStream().readAllBytes();
                 @SuppressWarnings("unchecked")
-                Map<String, String> req = MAPPER.readValue(body, Map.class);
+                Map<String, String> req = MAPPER.readValue(bytes, Map.class);
                 String docId = req.get("doc_id"), text = req.get("text");
-                if (docId == null || text == null) { sendError(e, 400, "doc_id and text required"); return; }
+                if (docId == null || text == null) { sendError(ex, 400, "doc_id and text required"); return; }
                 List<DocumentChunker.Chunk> chunks = chunker.chunk(docId, text);
+                log.info("Ingesting doc={} chunks={}", docId, chunks.size());
                 List<String> texts = chunks.stream().map(DocumentChunker.Chunk::text).toList();
                 List<float[]> embeddings = embeddingClient.embedBatch(texts);
                 int indexed = 0;
@@ -53,83 +57,60 @@ public class VektrServer {
                     indexed++;
                 }
                 totalIngest++;
-                sendJson(e, 200, Map.of("doc_id", docId, "chunks_indexed", indexed,
+                sendJson(ex, 200, Map.of("doc_id", docId, "chunks_indexed", indexed,
                     "total_vectors", hnswIndex.size()));
-            } catch (Exception err) { log.error("Ingest error", err); sendError(e, 500, err.getMessage()); }
+            } catch (Exception e) { log.error("Ingest error", e); sendError(ex, 500, e.getMessage()); }
         });
     }
 
-    private void handleSearch(io.undertow.server.HttpServerExchange ex) {
-        ex.getRequestReceiver().receiveFullBytes((e, body) -> {
+    private void handleSearch(HttpServerExchange ex) {
+        ex.startBlocking();
+        ex.dispatch(worker, () -> {
             try {
+                byte[] bytes = ex.getInputStream().readAllBytes();
                 @SuppressWarnings("unchecked")
-                Map<String, Object> req = MAPPER.readValue(body, Map.class);
+                Map<String, Object> req = MAPPER.readValue(bytes, Map.class);
                 String query = (String) req.get("query");
                 int k = req.containsKey("k") ? (int) req.get("k") : 5;
-                boolean hyde = req.containsKey("hyde") && Boolean.TRUE.equals(req.get("hyde"));
-                if (query == null || query.isBlank()) { sendError(e, 400, "query required"); return; }
-
-                // HyDE rewrite (optional, per-request flag)
-                String textToEmbed = (hyde && queryRewriter.isEnabled())
-                    ? queryRewriter.rewrite(query) : query;
-
-                // Cache lookup
-                float[] qEmbed = queryCache.get(textToEmbed);
+                if (query == null || query.isBlank()) { sendError(ex, 400, "query required"); return; }
+                float[] qEmbed = queryCache.get(query);
                 boolean cacheHit = (qEmbed != null);
                 if (!cacheHit) {
-                    qEmbed = embeddingClient.embed(textToEmbed);
-                    queryCache.put(textToEmbed, qEmbed);
-                } else {
-                    totalCacheHits++;
-                }
-
-                // Hybrid retrieval
+                    qEmbed = embeddingClient.embed(query);
+                    queryCache.put(query, qEmbed);
+                } else { totalCacheHits++; }
                 List<SearchResult> dense = hnswIndex.search(qEmbed, k * 2);
                 List<BM25Index.BM25Result> sparse = bm25Index.search(query, k * 2);
                 List<ReciprocalRankFusion.FusedResult> fused = rrf.fuse(sparse, dense, k);
-
                 List<Map<String, Object>> results = fused.stream().map(r -> {
                     Map<String, Object> m = new LinkedHashMap<>();
-                    m.put("chunk_id", r.docId());
-                    m.put("rrf_score", r.rrfScore());
+                    m.put("chunk_id", r.docId()); m.put("rrf_score", r.rrfScore());
                     m.put("text", chunkStore.getOrDefault(r.docId(), ""));
                     return m;
                 }).toList();
-
                 totalSearch++;
-                sendJson(e, 200, Map.of(
-                    "query", query,
-                    "cache_hit", cacheHit,
-                    "hyde_used", hyde && queryRewriter.isEnabled(),
-                    "results", results
-                ));
-            } catch (Exception err) { log.error("Search error", err); sendError(e, 500, err.getMessage()); }
+                sendJson(ex, 200, Map.of("query", query, "cache_hit", cacheHit, "results", results));
+            } catch (Exception e) { log.error("Search error", e); sendError(ex, 500, e.getMessage()); }
         });
     }
 
-    private void handleHealth(io.undertow.server.HttpServerExchange ex) {
-        sendJson(ex, 200, Map.of(
-            "status", "ok",
-            "vectors_indexed", hnswIndex.size(),
+    private void handleHealth(HttpServerExchange ex) {
+        ex.dispatch(worker, () -> sendJson(ex, 200, Map.of(
+            "status", "ok", "vectors_indexed", hnswIndex.size(),
             "bm25_docs", bm25Index.size(),
-            "embedding_service", embeddingClient.isHealthy() ? "up" : "down",
-            "hyde_enabled", queryRewriter.isEnabled()
-        ));
+            "embedding_service", embeddingClient.isHealthy() ? "up" : "down")));
     }
 
-    private void handleMetrics(io.undertow.server.HttpServerExchange ex) {
-        HnswIndex.IndexStats s = hnswIndex.stats();
-        QueryCache.CacheStats cs = queryCache.stats();
-        sendJson(ex, 200, Map.of(
-            "total_ingest", totalIngest,
-            "total_search", totalSearch,
-            "total_cache_hits", totalCacheHits,
-            "cache_hit_rate", cs.hitRate(),
-            "cache_size", cs.size(),
-            "index_size", s.totalNodes(),
-            "max_layer", s.maxLayer(),
-            "layer_distribution", s.layerDistribution()
-        ));
+    private void handleMetrics(HttpServerExchange ex) {
+        ex.dispatch(worker, () -> {
+            HnswIndex.IndexStats s = hnswIndex.stats();
+            QueryCache.CacheStats cs = queryCache.stats();
+            sendJson(ex, 200, Map.of(
+                "total_ingest", totalIngest, "total_search", totalSearch,
+                "cache_hit_rate", cs.hitRate(), "cache_size", cs.size(),
+                "index_size", s.totalNodes(), "max_layer", s.maxLayer(),
+                "layer_distribution", s.layerDistribution()));
+        });
     }
 
     public void start(int port) {
@@ -139,7 +120,7 @@ public class VektrServer {
             .add(Methods.GET,  "/health",  this::handleHealth)
             .add(Methods.GET,  "/metrics", this::handleMetrics);
         Undertow.builder().addHttpListener(port, "0.0.0.0").setHandler(router).build().start();
-        log.info("Vektr started on :{} | HyDE={}", port, queryRewriter.isEnabled());
+        log.info("Vektr started on :{}", port);
     }
 
     public static void main(String[] args) {
@@ -147,7 +128,7 @@ public class VektrServer {
         new VektrServer().start(port);
     }
 
-    private void sendJson(io.undertow.server.HttpServerExchange e, int status, Object body) {
+    private void sendJson(HttpServerExchange e, int status, Object body) {
         try {
             e.setStatusCode(status);
             e.getResponseHeaders().put(Headers.CONTENT_TYPE, "application/json");
@@ -155,7 +136,7 @@ public class VektrServer {
         } catch (Exception ex) { log.error("Send error", ex); }
     }
 
-    private void sendError(io.undertow.server.HttpServerExchange e, int status, String msg) {
+    private void sendError(HttpServerExchange e, int status, String msg) {
         sendJson(e, status, Map.of("error", msg));
     }
 }
