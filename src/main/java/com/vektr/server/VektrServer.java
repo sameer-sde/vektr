@@ -19,6 +19,8 @@ import io.undertow.util.Headers;
 import io.undertow.util.Methods;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -37,21 +39,19 @@ public class VektrServer {
     private volatile long totalIngest = 0, totalSearch = 0, totalCacheHits = 0;
 
     public VektrServer() {
-        // Load from disk if index exists, otherwise start fresh
         if (persistence.exists()) {
             try {
                 IndexPersistence.LoadedState state = persistence.load();
                 this.hnswIndex = state.index();
                 this.bm25Index = state.bm25();
                 this.chunkStore = new ConcurrentHashMap<>(state.chunkStore());
-                log.info("Resumed from disk: {} vectors, {} chunks",
-                    hnswIndex.size(), chunkStore.size());
+                log.info("Resumed from disk: {} vectors, {} chunks", hnswIndex.size(), chunkStore.size());
             } catch (Exception e) {
-                log.warn("Failed to load index from disk, starting fresh: {}", e.getMessage());
+                log.warn("Failed to load index: {}", e.getMessage());
                 initFresh();
             }
         } else {
-            log.info("No existing index found, starting fresh");
+            log.info("Starting fresh");
             initFresh();
         }
     }
@@ -60,6 +60,15 @@ public class VektrServer {
         this.hnswIndex = new HnswIndex(HnswConfig.defaults());
         this.bm25Index = new BM25Index();
         this.chunkStore = new ConcurrentHashMap<>();
+    }
+
+    private void handleDashboard(HttpServerExchange ex) throws Exception {
+        InputStream is = getClass().getClassLoader().getResourceAsStream("static/index.html");
+        if (is == null) { sendError(ex, 404, "Dashboard not found"); return; }
+        String html = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        ex.setStatusCode(200);
+        ex.getResponseHeaders().put(Headers.CONTENT_TYPE, "text/html; charset=utf-8");
+        ex.getResponseSender().send(html);
     }
 
     private void handleIngest(HttpServerExchange ex) throws Exception {
@@ -81,11 +90,7 @@ public class VektrServer {
             indexed++;
         }
         totalIngest++;
-
-        // Persist after every ingest
         persistence.save(hnswIndex, chunkStore);
-        log.info("Persisted index to disk");
-
         sendJson(ex, 200, Map.of("doc_id", docId, "chunks_indexed", indexed,
             "total_vectors", hnswIndex.size(), "persisted", true));
     }
@@ -108,7 +113,8 @@ public class VektrServer {
         List<ReciprocalRankFusion.FusedResult> fused = rrf.fuse(sparse, dense, k);
         List<Map<String, Object>> results = fused.stream().map(r -> {
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("chunk_id", r.docId()); m.put("rrf_score", r.rrfScore());
+            m.put("chunk_id", r.docId());
+            m.put("rrf_score", r.rrfScore());
             m.put("text", chunkStore.getOrDefault(r.docId(), ""));
             return m;
         }).toList();
@@ -117,22 +123,24 @@ public class VektrServer {
     }
 
     private void handleHealth(HttpServerExchange ex) throws Exception {
-        sendJson(ex, 200, Map.of(
-            "status", "ok",
+        sendJson(ex, 200, Map.of("status", "ok",
             "vectors_indexed", hnswIndex.size(),
             "bm25_docs", bm25Index.size(),
             "embedding_service", embeddingClient.isHealthy() ? "up" : "down",
-            "index_persisted", persistence.exists()
-        ));
+            "index_persisted", persistence.exists()));
     }
 
     private void handleMetrics(HttpServerExchange ex) throws Exception {
         HnswIndex.IndexStats s = hnswIndex.stats();
         QueryCache.CacheStats cs = queryCache.stats();
         sendJson(ex, 200, Map.of(
-            "total_ingest", totalIngest, "total_search", totalSearch,
-            "cache_hit_rate", cs.hitRate(), "cache_size", cs.size(),
-            "index_size", s.totalNodes(), "max_layer", s.maxLayer(),
+            "total_ingest", totalIngest,
+            "total_search", totalSearch,
+            "cache_hits", totalCacheHits,
+            "cache_hit_rate", cs.hitRate(),
+            "cache_size", cs.size(),
+            "index_size", s.totalNodes(),
+            "max_layer", s.maxLayer(),
             "layer_distribution", s.layerDistribution()));
     }
 
@@ -143,18 +151,18 @@ public class VektrServer {
         });
     }
 
-    @FunctionalInterface
-    interface CheckedHandler { void handle(HttpServerExchange ex) throws Exception; }
+    @FunctionalInterface interface CheckedHandler { void handle(HttpServerExchange ex) throws Exception; }
 
     public void start(int port) {
         RoutingHandler router = new RoutingHandler()
+            .add(Methods.GET,  "/",        blocking(this::handleDashboard))
             .add(Methods.POST, "/ingest",  blocking(this::handleIngest))
             .add(Methods.POST, "/search",  blocking(this::handleSearch))
             .add(Methods.GET,  "/health",  blocking(this::handleHealth))
             .add(Methods.GET,  "/metrics", blocking(this::handleMetrics));
         Undertow.builder().addHttpListener(port, "0.0.0.0").setHandler(router).build().start();
-        log.info("Vektr started on :{} | vectors={} chunks={}",
-            port, hnswIndex.size(), chunkStore.size());
+        log.info("Vektr started on :{} | vectors={} | dashboard: http://localhost:{}/",
+            port, hnswIndex.size(), port);
     }
 
     public static void main(String[] args) {

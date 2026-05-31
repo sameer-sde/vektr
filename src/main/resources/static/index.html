@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vektr — RAG Engine Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+  .header { background: #161b22; border-bottom: 1px solid #30363d; padding: 16px 32px; display: flex; align-items: center; gap: 16px; }
+  .logo { font-size: 22px; font-weight: 700; color: #58a6ff; letter-spacing: -1px; }
+  .logo span { color: #3fb950; }
+  .badge { background: #21262d; border: 1px solid #30363d; border-radius: 20px; padding: 4px 12px; font-size: 12px; color: #8b949e; }
+  .badge.green { border-color: #3fb950; color: #3fb950; }
+  .badge.red { border-color: #f85149; color: #f85149; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 32px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; margin-bottom: 32px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
+  .card-label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .card-value { font-size: 28px; font-weight: 700; color: #58a6ff; }
+  .card-sub { font-size: 12px; color: #8b949e; margin-top: 4px; }
+  .section { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 24px; margin-bottom: 24px; }
+  .section-title { font-size: 14px; font-weight: 600; color: #f0f6fc; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #58a6ff; }
+  .search-row { display: flex; gap: 12px; }
+  input, textarea { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-family: inherit; font-size: 14px; padding: 10px 14px; outline: none; transition: border-color 0.2s; }
+  input:focus, textarea:focus { border-color: #58a6ff; }
+  input { flex: 1; }
+  textarea { width: 100%; height: 100px; resize: vertical; margin-bottom: 12px; }
+  button { background: #238636; border: 1px solid #2ea043; border-radius: 6px; color: #fff; cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 600; padding: 10px 20px; transition: all 0.2s; white-space: nowrap; }
+  button:hover { background: #2ea043; }
+  button:disabled { background: #21262d; border-color: #30363d; color: #8b949e; cursor: not-allowed; }
+  button.secondary { background: #21262d; border-color: #30363d; color: #c9d1d9; }
+  button.secondary:hover { background: #30363d; }
+  .result { border: 1px solid #30363d; border-radius: 6px; padding: 16px; margin-bottom: 12px; transition: border-color 0.2s; }
+  .result:hover { border-color: #58a6ff; }
+  .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .result-id { font-size: 12px; color: #58a6ff; }
+  .result-score { font-size: 12px; color: #3fb950; background: #0d2b16; padding: 2px 8px; border-radius: 4px; }
+  .result-text { font-size: 13px; color: #c9d1d9; line-height: 1.6; }
+  .cache-tag { font-size: 11px; color: #d29922; background: #2b2007; padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
+  .layer-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .layer-label { font-size: 12px; color: #8b949e; width: 50px; }
+  .bar-track { flex: 1; background: #21262d; border-radius: 4px; height: 8px; }
+  .bar-fill { height: 100%; border-radius: 4px; background: #58a6ff; transition: width 0.5s; }
+  .bar-count { font-size: 12px; color: #8b949e; width: 30px; text-align: right; }
+  .status-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .empty { color: #8b949e; font-size: 14px; text-align: center; padding: 32px; }
+  .log { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; font-size: 12px; color: #8b949e; max-height: 120px; overflow-y: auto; }
+  .log-line { margin-bottom: 4px; }
+  .log-line.ok { color: #3fb950; }
+  .log-line.err { color: #f85149; }
+  .ingest-row { display: flex; gap: 12px; margin-bottom: 12px; }
+  .ingest-row input { flex: 1; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 6px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">Vek<span>tr</span></div>
+  <div class="badge" id="embed-badge">embed ●</div>
+  <div class="badge green" id="server-badge">server ●</div>
+  <div style="margin-left:auto; font-size:12px; color:#8b949e;">Production RAG Engine · Hand-rolled HNSW</div>
+</div>
+
+<div class="container">
+
+  <!-- Metrics -->
+  <div class="grid">
+    <div class="card">
+      <div class="card-label">Vectors Indexed</div>
+      <div class="card-value" id="m-vectors">—</div>
+      <div class="card-sub">HNSW nodes</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Cache Hit Rate</div>
+      <div class="card-value" id="m-cache">—</div>
+      <div class="card-sub" id="m-cache-sub">LRU queries cached</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Searches</div>
+      <div class="card-value" id="m-searches">—</div>
+      <div class="card-sub" id="m-ingest-sub">ingests: —</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Max HNSW Layer</div>
+      <div class="card-value" id="m-layer">—</div>
+      <div class="card-sub">graph depth</div>
+    </div>
+  </div>
+
+  <!-- Search -->
+  <div class="section">
+    <div class="section-title"><div class="dot"></div>Semantic Search</div>
+    <div class="search-row">
+      <input type="text" id="query-input" placeholder="Ask anything about your documents..." 
+             onkeydown="if(event.key==='Enter') search()">
+      <input type="number" id="k-input" value="5" min="1" max="20" style="width:70px">
+      <button onclick="search()" id="search-btn">Search</button>
+    </div>
+    <div id="search-status" style="font-size:12px;color:#8b949e;margin-top:8px;"></div>
+    <div id="results" style="margin-top:16px;"></div>
+  </div>
+
+  <!-- Ingest -->
+  <div class="section">
+    <div class="section-title"><div class="dot" style="background:#3fb950"></div>Ingest Document</div>
+    <div class="ingest-row">
+      <input type="text" id="doc-id" placeholder="Document ID (e.g. wikipedia-hnsw)">
+    </div>
+    <textarea id="doc-text" placeholder="Paste document text here..."></textarea>
+    <div style="display:flex;gap:12px;align-items:center">
+      <button onclick="ingest()" id="ingest-btn">Ingest & Index</button>
+      <button class="secondary" onclick="loadWikiSample()">Load Wikipedia Sample</button>
+      <span id="ingest-status" style="font-size:12px;color:#8b949e;"></span>
+    </div>
+    <div id="ingest-log" class="log" style="margin-top:12px;display:none;"></div>
+  </div>
+
+  <!-- Layer Distribution -->
+  <div class="section">
+    <div class="section-title"><div class="dot" style="background:#d29922"></div>HNSW Layer Distribution</div>
+    <div id="layer-chart"><div class="empty">No data yet — ingest documents to see graph structure</div></div>
+  </div>
+
+</div>
+
+<script>
+const API = 'http://localhost:8080';
+let searchCount = 0;
+
+async function fetchMetrics() {
+  try {
+    const [health, metrics] = await Promise.all([
+      fetch(API + '/health').then(r => r.json()),
+      fetch(API + '/metrics').then(r => r.json())
+    ]);
+    document.getElementById('m-vectors').textContent = metrics.index_size ?? '0';
+    document.getElementById('m-searches').textContent = metrics.total_search ?? '0';
+    document.getElementById('m-ingest-sub').textContent = 'ingests: ' + (metrics.total_ingest ?? '0');
+    const rate = metrics.cache_hit_rate ?? 0;
+    document.getElementById('m-cache').textContent = (rate * 100).toFixed(0) + '%';
+    document.getElementById('m-cache-sub').textContent = 'cache size: ' + (metrics.cache_size ?? 0);
+    document.getElementById('m-layer').textContent = metrics.max_layer ?? '—';
+
+    const embedBadge = document.getElementById('embed-badge');
+    const serverBadge = document.getElementById('server-badge');
+    embedBadge.textContent = 'embed ' + (health.embedding_service === 'up' ? '●' : '○');
+    embedBadge.className = 'badge ' + (health.embedding_service === 'up' ? 'green' : 'red');
+    serverBadge.className = 'badge green';
+
+    renderLayerChart(metrics.layer_distribution ?? {});
+  } catch (e) {
+    document.getElementById('server-badge').className = 'badge red';
+    document.getElementById('server-badge').textContent = 'server ○';
+  }
+}
+
+function renderLayerChart(dist) {
+  const el = document.getElementById('layer-chart');
+  if (!dist || Object.keys(dist).length === 0) {
+    el.innerHTML = '<div class="empty">No data yet — ingest documents to see graph structure</div>';
+    return;
+  }
+  const total = Object.values(dist).reduce((a, b) => a + b, 0);
+  const maxCount = Math.max(...Object.values(dist));
+  let html = '';
+  Object.entries(dist).sort((a, b) => Number(a[0]) - Number(b[0])).forEach(([layer, count]) => {
+    const pct = total > 0 ? (count / maxCount * 100).toFixed(0) : 0;
+    const nodePct = total > 0 ? (count / total * 100).toFixed(0) : 0;
+    html += `<div class="layer-bar">
+      <div class="layer-label">Layer ${layer}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+      <div class="bar-count">${count}</div>
+      <div style="font-size:11px;color:#8b949e;width:40px">${nodePct}%</div>
+    </div>`;
+  });
+  html += `<div style="font-size:12px;color:#8b949e;margin-top:8px">Total nodes: ${total} — exponential decay per HNSW paper (Malkov & Yashunin 2018)</div>`;
+  el.innerHTML = html;
+}
+
+async function search() {
+  const query = document.getElementById('query-input').value.trim();
+  const k = parseInt(document.getElementById('k-input').value) || 5;
+  if (!query) return;
+
+  const btn = document.getElementById('search-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Searching...';
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('search-status').textContent = '';
+
+  const t0 = Date.now();
+  try {
+    const res = await fetch(API + '/search', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query, k})
+    });
+    const data = await res.json();
+    const ms = Date.now() - t0;
+
+    let statusHtml = `${ms}ms`;
+    if (data.cache_hit) statusHtml += '<span class="cache-tag">⚡ cache hit</span>';
+    statusHtml += ` · ${(data.results || []).length} results`;
+    document.getElementById('search-status').innerHTML = statusHtml;
+
+    if (!data.results || data.results.length === 0) {
+      document.getElementById('results').innerHTML = '<div class="empty">No results found. Try ingesting some documents first.</div>';
+    } else {
+      document.getElementById('results').innerHTML = data.results.map((r, i) => `
+        <div class="result">
+          <div class="result-header">
+            <span class="result-id">${r.chunk_id}</span>
+            <span class="result-score">RRF ${r.rrf_score.toFixed(4)}</span>
+          </div>
+          <div class="result-text">${escapeHtml(r.text)}</div>
+        </div>
+      `).join('');
+    }
+    fetchMetrics();
+  } catch (e) {
+    document.getElementById('search-status').textContent = 'Error: ' + e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Search';
+}
+
+async function ingest() {
+  const docId = document.getElementById('doc-id').value.trim();
+  const text = document.getElementById('doc-text').value.trim();
+  if (!docId || !text) { alert('Enter both a document ID and text'); return; }
+
+  const btn = document.getElementById('ingest-btn');
+  const status = document.getElementById('ingest-status');
+  const logEl = document.getElementById('ingest-log');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Ingesting...';
+  logEl.style.display = 'block';
+  logEl.innerHTML = '';
+  addLog(logEl, `Chunking "${docId}"...`);
+
+  try {
+    const t0 = Date.now();
+    const res = await fetch(API + '/ingest', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({doc_id: docId, text})
+    });
+    const data = await res.json();
+    const ms = Date.now() - t0;
+
+    if (data.error) {
+      addLog(logEl, 'Error: ' + data.error, true);
+      status.textContent = 'Failed';
+    } else {
+      addLog(logEl, `✓ Chunked into ${data.chunks_indexed} chunks`, false, true);
+      addLog(logEl, `✓ Embedded + indexed in ${ms}ms`, false, true);
+      addLog(logEl, `✓ Persisted to disk. Total vectors: ${data.total_vectors}`, false, true);
+      status.textContent = `Done — ${data.chunks_indexed} chunks in ${ms}ms`;
+      document.getElementById('doc-id').value = '';
+      document.getElementById('doc-text').value = '';
+      fetchMetrics();
+    }
+  } catch (e) {
+    addLog(logEl, 'Error: ' + e.message, true);
+  }
+  btn.disabled = false;
+  btn.textContent = 'Ingest & Index';
+}
+
+function addLog(el, msg, isErr = false, isOk = false) {
+  const line = document.createElement('div');
+  line.className = 'log-line' + (isErr ? ' err' : '') + (isOk ? ' ok' : '');
+  line.textContent = new Date().toLocaleTimeString() + ' ' + msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function loadWikiSample() {
+  document.getElementById('doc-id').value = 'wikipedia-machine-learning';
+  document.getElementById('doc-text').value = `Machine learning (ML) is a field of study in artificial intelligence concerned with the development and study of statistical algorithms that can learn from data and generalize to unseen data, and so perform tasks without explicit instructions. Recently, artificial neural networks have been able to surpass many previous approaches in performance.
+
+ML finds application in many fields, including natural language processing, computer vision, speech recognition, email filtering, agriculture, and medicine. The application of ML to business problems is known as predictive analytics.
+
+Statistics and mathematical optimization methods comprise the foundations of machine learning. Data mining is a related field of study, focusing on exploratory data analysis (EDA) via unsupervised learning.
+
+Supervised learning algorithms are trained on labeled example input-output pairs. The algorithm learns a function that maps an input to an output. Popular algorithms include linear regression, logistic regression, support vector machines, decision trees, and neural networks.
+
+Unsupervised learning algorithms take input data that has not been labeled, classified or categorized. Instead of responding to feedback, unsupervised learning algorithms identify commonalities in the data and react based on the presence or absence of such commonalities in each new piece of data.`;
+}
+
+function escapeHtml(text) {
+  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Poll metrics every 5 seconds
+fetchMetrics();
+setInterval(fetchMetrics, 5000);
+</script>
+</body>
+</html>
