@@ -23,38 +23,67 @@ Search "difference between BERT and GPT" across 31 Wikipedia articles — result
 
 ## Architecture
 
-```
-POST /ingest                          POST /search
-     |                                     |
-     v                                     v
-DocumentChunker                    QueryCache (LRU)
-sentence-aware                     10k entries
-sliding window                     ReadWriteLock
-overlap=2 sents                    hit -> <1ms return
-     |                             miss |
-     v                                  v
-EmbeddingClient               EmbeddingClient
-batch embed                   all-MiniLM-L6-v2
-~28ms per batch               384-dim, ~4ms warm
-     |                                  |
-     v                                  v
-HnswIndex.insert()        +-------------+-------------+
-Hand-rolled HNSW          |                           |
-M=16, ef=200        HnswIndex.search()      BM25Index.search()
-recall@10=0.984     dense ANN               keyword BM25
-     |                           |                   |
-     v                           +--------+----------+
-IndexPersistence                          |
-binary format                             v
-atomic rename               ReciprocalRankFusion
-<15ms load                  RRF(d) = 1/(60+rank_dense)
-                                       + 1/(60+rank_bm25)
-                                          |
-                                          v
-                                    ranked results
+```mermaid
+flowchart TD
+    Client(["Client
+(Browser / curl)"])
+
+    Client -->|POST /ingest| DC
+    Client -->|POST /search| QC
+    Client -->|GET /| Dashboard["React Dashboard
+live metrics + search UI"]
+
+    subgraph Ingest Pipeline
+        DC["DocumentChunker
+sentence-aware
+sliding window
+overlap=2 sentences"]
+        EC1["EmbeddingClient
+batch embed ~28ms"]
+        DC --> EC1
+    end
+
+    subgraph Search Pipeline
+        QC["QueryCache
+LRU 10k entries
+ReadWriteLock
+hit = <1ms"]
+        EC2["EmbeddingClient
+all-MiniLM-L6-v2
+384-dim, ~4ms warm"]
+        QC -->|miss| EC2
+        QC -->|hit| Results
+    end
+
+    EC1 --> HNSW
+    EC1 --> BM25
+    EC1 --> IP
+
+    EC2 --> HNSW
+    EC2 --> BM25
+
+    HNSW["HnswIndex
+hand-rolled HNSW
+M=16, ef=200
+recall@10=0.984"]
+    BM25["BM25Index
+inverted index
+k1=1.5, b=0.75"]
+    IP["IndexPersistence
+binary float32
+atomic rename
+<15ms load"]
+
+    HNSW --> RRF
+    BM25 --> RRF
+
+    RRF["ReciprocalRankFusion
+RRF = 1/60+rank_dense
+    + 1/60+rank_bm25"]
+    RRF --> Results(["Ranked Results"])
 ```
 
----
+**Request flow:** Client → QueryCache → embed query → HNSW + BM25 in parallel → RRF fusion → ranked chunks
 
 ## How it works
 
