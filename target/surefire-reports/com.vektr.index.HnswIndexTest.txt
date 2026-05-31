@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.vektr.index.HnswIndexTest
--------------------------------------------------------------------------------
-Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.753 s -- in com.vektr.index.HnswIndexTest
