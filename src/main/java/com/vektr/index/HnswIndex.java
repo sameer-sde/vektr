@@ -89,6 +89,19 @@ public class HnswIndex {
 
     public int size() { return nodes.size(); }
     public boolean contains(String externalId) { return externalToInternal.containsKey(externalId); }
+    public HnswConfig getConfig() { return config; }
+    public Collection<HnswNode> getAllNodes() { return nodes.values(); }
+
+    public void restoreFromNodes(List<HnswNode> nodeList, int restoredEntryPoint, int restoredMaxLayer) {
+        for (HnswNode node : nodeList) {
+            nodes.put(node.id, node);
+            externalToInternal.put(node.externalId, node.id);
+            nodeCounter.set(Math.max(nodeCounter.get(), node.id + 1));
+        }
+        this.entryPointId = restoredEntryPoint;
+        this.maxLayerSeen = restoredMaxLayer;
+        log.info("Restored {} nodes, entryPoint={}, maxLayer={}", nodeList.size(), restoredEntryPoint, restoredMaxLayer);
+    }
 
     private int assignLayer() {
         return (int) Math.floor(-Math.log(ThreadLocalRandom.current().nextDouble()) * config.mL());
