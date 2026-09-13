@@ -1,7 +1,6 @@
 # Vektr — RAG Engine with Hand-Rolled Vector Search
 
-[![Vektr Dashboard](docs/images/dashboard.png)](docs/images/dashboard.png)
-> Production RAG engine built in Java and Python. The HNSW vector index is implemented from scratch — no FAISS, no ChromaDB, no Pinecone.
+Production RAG engine built in Java and Python. The HNSW vector index is implemented from scratch — no FAISS, no ChromaDB, no Pinecone.
 
 **84 vectors · 31 Wikipedia articles · 35ms query latency · recall@10 = 0.984**
 
@@ -233,6 +232,11 @@ source documents with real RRF scores and latency:
 matching the exponential decay the HNSW paper predicts:
 
 [![Vektr HNSW layer distribution chart](docs/images/hnsw-distribution.png)](docs/images/hnsw-distribution.png)
+
+**3. Full dashboard** — the complete UI: search box, ingest panel, and
+live index stats, all from the actual running system:
+
+[![Vektr live search dashboard](docs/images/dashboard.png)](docs/images/dashboard.png)
 
 ---
 
