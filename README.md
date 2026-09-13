@@ -1,7 +1,6 @@
 # Vektr — RAG Engine with Hand-Rolled Vector Search
 
-![Vektr Dashboard](docs/images/dashboard.png)
-
+[![Vektr Dashboard](docs/images/dashboard.png)](docs/images/dashboard.png)
 > Production RAG engine built in Java and Python. The HNSW vector index is implemented from scratch — no FAISS, no ChromaDB, no Pinecone.
 
 **84 vectors · 31 Wikipedia articles · 35ms query latency · recall@10 = 0.984**
@@ -10,14 +9,19 @@
 
 ## Demo
 
-Search "difference between BERT and GPT" across 31 Wikipedia articles — results from 4 different source documents returned in 35ms:
+Search "difference between BERT and GPT" across 31 Wikipedia articles — results from 4 different source documents returned in 100ms:
 
-| Rank | Source | RRF Score |
-|------|--------|-----------|
-| 1 | wikipedia-transformer_chunk_2 | 0.0325 |
-| 2 | gpt-4_chunk_0 | 0.0317 |
-| 3 | bert_language_model_chunk_1 | 0.0308 |
-| 4 | bert_language_model_chunk_2 | 0.0303 |
+| Rank | Source                          | RRF Score |
+| ---- | -------------------------------- | --------- |
+| 1    | wikipedia-transformer_chunk_2    | 0.0325    |
+| 2    | wikipedia-transformer_chunk_1    | 0.0325    |
+| 3    | gpt-4_chunk_0                    | 0.0317    |
+| 4    | bert_language_model_chunk_1      | 0.0308    |
+| 5    | bert_language_model_chunk_2      | 0.0303    |
+
+**Live screenshot of this exact query, captured from the running dashboard:**
+
+[![Vektr live semantic search results with RRF scores](docs/images/search-results.png)](docs/images/search-results.png)
 
 ---
 
@@ -125,6 +129,10 @@ Layer 0:  entry ─ n ─ n ─ nodeB ─ n ─ nodeA ─ n ─ nodeC ─ ...
 - Search: greedy descent to layer 1, beam search at layer 0 with efSearch candidates
 - Parameters: M=16, efConstruction=200, efSearch=50
 
+Real layer distribution from a live 84-node index — matches the paper's expected exponential decay per layer:
+
+[![Vektr HNSW layer distribution chart](docs/images/hnsw-distribution.png)](docs/images/hnsw-distribution.png)
+
 ### BM25Index
 
 Standard BM25 scoring — catches exact keyword matches that dense retrieval misses.
@@ -148,6 +156,7 @@ Only uses rank position — dense cosine distances and BM25 scores never need to
 ### QueryCache
 
 LRU cache with ReadWriteLock:
+
 - Many concurrent readers allowed simultaneously, never blocking each other
 - Writers get exclusive access only during cache updates
 - 10,000 entry capacity, evicts least-recently-used on overflow
@@ -173,16 +182,16 @@ The hypothetical answer lives in answer-space, much closer to real document embe
 
 ## Benchmarks
 
-| Metric | Value |
-|--------|-------|
-| HNSW Recall@10 (1000 vectors, 50 queries) | 0.984 |
-| Embedding — cold start | ~1500ms |
-| Embedding — warm single text | ~4ms |
-| Embedding — warm batch of 3 | ~28ms |
-| Search — cold (no cache) | ~35ms |
-| Search — cached | <1ms |
-| Index load from disk on restart | <15ms |
-| Dataset | 31 Wikipedia articles, 84 vectors |
+| Metric                                    | Value                             |
+| ------------------------------------------ | ---------------------------------- |
+| HNSW Recall@10 (1000 vectors, 50 queries) | 0.984                             |
+| Embedding — cold start                    | ~1500ms                           |
+| Embedding — warm single text              | ~4ms                              |
+| Embedding — warm batch of 3               | ~28ms                             |
+| Search — cold (no cache)                  | ~35ms                             |
+| Search — cached                           | <1ms                              |
+| Index load from disk on restart           | <15ms                             |
+| Dataset                                   | 31 Wikipedia articles, 84 vectors |
 
 Full results: benchmarks/RESULTS.md
 
