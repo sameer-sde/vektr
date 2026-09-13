@@ -233,11 +233,6 @@ matching the exponential decay the HNSW paper predicts:
 
 [![Vektr HNSW layer distribution chart](docs/images/hnsw-distribution.png)](docs/images/hnsw-distribution.png)
 
-**3. Full dashboard** — the complete UI: search box, ingest panel, and
-live index stats, all from the actual running system:
-
-[![Vektr live search dashboard](docs/images/dashboard.png)](docs/images/dashboard.png)
-
 ---
 
 ## API
