@@ -9,19 +9,14 @@
 
 ## Demo
 
-Search "difference between BERT and GPT" across 31 Wikipedia articles — results from 4 different source documents returned in 100ms:
+Search "difference between BERT and GPT" across 31 Wikipedia articles — results from 4 different source documents returned in 35ms:
 
 | Rank | Source                          | RRF Score |
 | ---- | -------------------------------- | --------- |
 | 1    | wikipedia-transformer_chunk_2    | 0.0325    |
-| 2    | wikipedia-transformer_chunk_1    | 0.0325    |
-| 3    | gpt-4_chunk_0                    | 0.0317    |
-| 4    | bert_language_model_chunk_1      | 0.0308    |
-| 5    | bert_language_model_chunk_2      | 0.0303    |
-
-**Live screenshot of this exact query, captured from the running dashboard:**
-
-[![Vektr live semantic search results with RRF scores](docs/images/search-results.png)](docs/images/search-results.png)
+| 2    | gpt-4_chunk_0                    | 0.0317    |
+| 3    | bert_language_model_chunk_1      | 0.0308    |
+| 4    | bert_language_model_chunk_2      | 0.0303    |
 
 ---
 
@@ -129,10 +124,6 @@ Layer 0:  entry ─ n ─ n ─ nodeB ─ n ─ nodeA ─ n ─ nodeC ─ ...
 - Search: greedy descent to layer 1, beam search at layer 0 with efSearch candidates
 - Parameters: M=16, efConstruction=200, efSearch=50
 
-Real layer distribution from a live 84-node index — matches the paper's expected exponential decay per layer:
-
-[![Vektr HNSW layer distribution chart](docs/images/hnsw-distribution.png)](docs/images/hnsw-distribution.png)
-
 ### BM25Index
 
 Standard BM25 scoring — catches exact keyword matches that dense retrieval misses.
@@ -222,6 +213,26 @@ mvn test
 # Bulk ingest Wikipedia articles
 python3 ml/ingest_wikipedia.py
 ```
+
+---
+
+## Proof: real search results, captured end-to-end
+
+These are real screenshots from an actual running instance on a laptop —
+not mockups. Together they show a live semantic search returning ranked
+results, and the internal HNSW graph structure that powers it.
+
+**1. Live search results** — the query "difference between BERT and GPT"
+run against the actual index, returning ranked results from 4 distinct
+source documents with real RRF scores and latency:
+
+[![Vektr live semantic search results with RRF scores](docs/images/search-results.png)](docs/images/search-results.png)
+
+**2. HNSW layer distribution** — real layer breakdown from the live
+84-node index (80 nodes / 95% at Layer 0, 4 nodes / 5% at Layer 1),
+matching the exponential decay the HNSW paper predicts:
+
+[![Vektr HNSW layer distribution chart](docs/images/hnsw-distribution.png)](docs/images/hnsw-distribution.png)
 
 ---
 
